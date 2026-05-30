@@ -1,5 +1,6 @@
-# BOT STORE UZ - Asosiy Do'kon Boti
-import os, sqlite3, asyncio
+# BOT STORE UZ - Tuzatilgan versiya
+import os
+import sqlite3
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -12,9 +13,28 @@ ADMIN_ID = 6639130930
 conn = sqlite3.connect('botstore.db', check_same_thread=False)
 cursor = conn.cursor()
 cursor.executescript('''
-    CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT, balance INTEGER DEFAULT 0);
-    CREATE TABLE IF NOT EXISTS subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, bot_type TEXT, bot_token TEXT, bot_username TEXT, status TEXT DEFAULT 'active', start_date TEXT, end_date TEXT);
-    CREATE TABLE IF NOT EXISTS payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER, date TEXT);
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY, 
+        username TEXT, 
+        full_name TEXT, 
+        balance INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, 
+        user_id INTEGER, 
+        bot_type TEXT, 
+        bot_token TEXT, 
+        bot_username TEXT, 
+        status TEXT DEFAULT 'active', 
+        start_date TEXT, 
+        end_date TEXT
+    );
+    CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, 
+        user_id INTEGER, 
+        amount INTEGER, 
+        date TEXT
+    );
 ''')
 conn.commit()
 
@@ -40,9 +60,14 @@ BOTS = {
 # Asosiy menyu
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    cursor.execute("INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)", 
-                   (user.id, user.username, user.full_name))
-    conn.commit()
+    try:
+        cursor.execute(
+            "INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)", 
+            (user.id, user.username, user.full_name)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Database error: {e}")
     
     text = f"🎉 *BOT STORE UZ* ga xush kelibsiz, {user.first_name}!\n\n📦 15 ta professional bot\n✅ 7 kun BEPUL sinov\n💰 Keyin kuniga 300 so'm"
     
@@ -77,7 +102,11 @@ async def bot_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     bot_id = query.data.replace("info_", "")
-    bot = BOTS[bot_id]
+    bot = BOTS.get(bot_id)
+    
+    if not bot:
+        await query.edit_message_text("Bot topilmadi!")
+        return
     
     text = f"*{bot['name']}*\n\n📝 {bot['desc']}\n💰 Narx: {bot['price']} so'm/kun\n🆓 7 kun BEPUL"
     
@@ -95,9 +124,13 @@ async def activate_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     bot_id = query.data.replace("activate_", "")
     
-    cursor.execute("SELECT * FROM subscriptions WHERE user_id = ? AND bot_type = ? AND status = 'active'", (user_id, bot_id))
+    # Oldin olinganmi tekshirish
+    cursor.execute(
+        "SELECT * FROM subscriptions WHERE user_id = ? AND bot_type = ? AND status = 'active'", 
+        (user_id, bot_id)
+    )
     if cursor.fetchone():
-        await query.edit_message_text("❌ Siz bu botni allaqachon olgansiz!\n📦 /mybots")
+        await query.edit_message_text("❌ Siz bu botni allaqachon olgansiz!\n📦 Mening botlarim: /start")
         return
     
     context.user_data['activating'] = bot_id
@@ -122,37 +155,49 @@ async def receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     token = update.message.text.strip()
     bot_id = context.user_data['activating']
+    bot = BOTS.get(bot_id, {"name": "Noma'lum"})
     
     try:
         from telegram import Bot
         temp = Bot(token=token)
         info = await temp.get_me()
         
-        start = datetime.now()
-        end = start + timedelta(days=7)
+        start_date = datetime.now()
+        end_date = start_date + timedelta(days=7)
         
         cursor.execute(
             "INSERT INTO subscriptions (user_id, bot_type, bot_token, bot_username, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, bot_id, token, info.username, start.isoformat(), end.isoformat())
+            (user_id, bot_id, token, info.username, start_date.isoformat(), end_date.isoformat())
         )
         conn.commit()
         
         del context.user_data['activating']
         
         # Admin'ga xabar
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"🆕 Yangi faollashtirish!\n👤 ID: `{user_id}`\n🤖 {BOTS[bot_id]['name']}\n🔑 Token: `{token}`\n📅 Tugash: {end.strftime('%d.%m.%Y')}",
-            parse_mode='Markdown'
-        )
+        try:
+            await context.bot.send_message(
+                ADMIN_ID,
+                f"🆕 Yangi faollashtirish!\n👤 ID: `{user_id}`\n🤖 {bot['name']}\n🔑 Token: `{token}`\n📅 Tugash: {end_date.strftime('%d.%m.%Y')}",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            print(f"Admin xabari yuborilmadi: {e}")
         
         await update.message.reply_text(
-            f"✅ *TABRIKLAYMIZ!*\n\n🤖 Bot: @{info.username}\n📅 Bepul: {end.strftime('%d.%m.%Y')} gacha\n⏰ 24/7 ishlaydi!\n\nSavollar: /help",
+            f"✅ *TABRIKLAYMIZ!*\n\n🤖 Bot: @{info.username}\n📅 Bepul: {end_date.strftime('%d.%m.%Y')} gacha\n⏰ 24/7 ishlaydi!\n\nSavollar: /start",
             parse_mode='Markdown'
         )
         
     except Exception as e:
-        await update.message.reply_text(f"❌ Xatolik! Token noto'g'ri.\n\n{str(e)[:100]}\n\nQayta urining!")
+        error_msg = str(e)
+        print(f"Token error: {error_msg}")
+        
+        if "Unauthorized" in error_msg:
+            await update.message.reply_text("❌ Token noto'g'ri! @BotFather'dan yangi token oling.")
+        elif "Conflict" in error_msg:
+            await update.message.reply_text("❌ Bu token boshqa botda ishlatilgan. Yangi bot yarating.")
+        else:
+            await update.message.reply_text(f"❌ Xatolik! Token noto'g'ri.\n\nIltimos @BotFather'dan yangi token oling va qayta yuboring.")
 
 # Mening botlarim
 async def my_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,11 +205,14 @@ async def my_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     user_id = query.from_user.id
-    cursor.execute("SELECT * FROM subscriptions WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active'", (user_id,))
     subs = cursor.fetchall()
     
     if not subs:
-        await query.edit_message_text("📦 Hali botlaringiz yo'q!\n🛍 /catalog", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Katalogga o'tish", callback_data="catalog")]]))
+        await query.edit_message_text(
+            "📦 Hali botlaringiz yo'q!\n\n🛍 Katalogni ko'rish uchun:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Katalogga o'tish", callback_data="catalog")]])
+        )
         return
     
     text = "📦 *MENING BOTLARIM*\n\n"
@@ -173,8 +221,12 @@ async def my_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for sub in subs:
         bot = BOTS.get(sub[2])
         if bot:
-            days = (datetime.fromisoformat(sub[6]) - datetime.now()).days
-            text += f"✅ {bot['name']}\n⏳ Qolgan: {max(0, days)} kun\n🤖 @{sub[5]}\n\n"
+            try:
+                end_date = datetime.fromisoformat(sub[6])
+                days = (end_date - datetime.now()).days
+                text += f"✅ {bot['name']}\n⏳ Qolgan: {max(0, days)} kun\n🤖 @{sub[5]}\n\n"
+            except:
+                text += f"✅ {bot['name']}\n🤖 @{sub[5]}\n\n"
     
     keyboard.append([InlineKeyboardButton("🛍 Yangi bot olish", callback_data="catalog")])
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -190,16 +242,44 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     balance_amount = bal[0] if bal else 0
     
     await query.edit_message_text(
-        f"💰 Balans: {balance_amount} so'm\n\nTo'lov uchun: @admin_username",
+        f"💰 Balans: {balance_amount} so'm\n\n💳 To'ldirish uchun:\n📱 Click: +998901234567\n💳 Payme: 8600xxxx1234\n\nChekni shu yerga yuboring!",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ ORQAGA", callback_data="main_menu")]])
     )
+
+# Rasm qabul qilish (chek)
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    
+    await update.message.reply_text("✅ Chek qabul qilindi!\n⏰ Admin tez orada tasdiqlaydi.")
+    
+    # Admin'ga forward
+    try:
+        await context.bot.forward_message(
+            chat_id=ADMIN_ID,
+            from_chat_id=user_id,
+            message_id=update.message.message_id
+        )
+        await context.bot.send_message(
+            ADMIN_ID,
+            f"💳 Yangi to'lov cheki!\n👤 User ID: `{user_id}`",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        print(f"Chek forward error: {e}")
 
 # Yordam
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     await query.edit_message_text(
-        "📞 *YORDAM*\n\n❓ Bot tanlang\n🔑 @BotFather'dan token oling\n📤 Tokenni yuboring\n✅ Bot ishga tushadi!\n\nAdmin: @bexruz_admin",
+        "📞 *YORDAM*\n\n"
+        "1️⃣ Katalogdan bot tanlang\n"
+        "2️⃣ @BotFather'dan token oling\n"
+        "3️⃣ Tokenni yuboring\n"
+        "4️⃣ Bot 7 kun BEPUL ishlaydi!\n\n"
+        "💰 Keyin kuniga 300 so'm\n"
+        "📞 Admin: @yoldoshev_3",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ ORQAGA", callback_data="main_menu")]])
     )
@@ -210,6 +290,7 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     if query.from_user.id != ADMIN_ID:
+        await query.edit_message_text("⛔ Ruxsat yo'q!")
         return
     
     cursor.execute("SELECT COUNT(*) FROM users")
@@ -217,21 +298,25 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("SELECT COUNT(*) FROM subscriptions WHERE status='active'")
     active = cursor.fetchone()[0]
     
+    text = f"👨‍💼 *ADMIN PANEL*\n\n👥 Foydalanuvchilar: {users}\n🤖 Aktiv botlar: {active}"
+    
     await query.edit_message_text(
-        f"👨‍💼 *ADMIN*\n\n👥 Foydalanuvchilar: {users}\n🤖 Aktiv botlar: {active}",
+        text, 
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ ORQAGA", callback_data="main_menu")]])
     )
 
-# Health check
-async def health(request):
-    return web.Response(text="OK")
-
-# Asosiy
+# Asosiy funksiya
 def main():
+    print("🚀 Bot ishga tushmoqda...")
+    
+    # Application yaratish
     app = Application.builder().token(TOKEN).build()
     
+    # Command handlerlar
     app.add_handler(CommandHandler("start", start))
+    
+    # Callback handlerlar
     app.add_handler(CallbackQueryHandler(catalog, pattern="^catalog$"))
     app.add_handler(CallbackQueryHandler(bot_info, pattern="^info_"))
     app.add_handler(CallbackQueryHandler(activate_bot, pattern="^activate_"))
@@ -240,10 +325,16 @@ def main():
     app.add_handler(CallbackQueryHandler(help_cmd, pattern="^help$"))
     app.add_handler(CallbackQueryHandler(start, pattern="^main_menu$"))
     app.add_handler(CallbackQueryHandler(admin, pattern="^admin$"))
+    
+    # Message handlerlar
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_token))
     
-    print("🚀 Bot Store Uz ishga tushdi!")
-    app.run_polling()
+    print("✅ Bot Store Uz ishga tushdi!")
+    print("📱 Telegram'da /start yozing!")
+    
+    # Polling boshlash
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
